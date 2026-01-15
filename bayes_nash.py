@@ -27,10 +27,8 @@ class Solver:
         self.n2 = p2.n
         self.pairs = p1.n * p2.n
 
-        # should be new data, not view
         self.omega = np.outer(p1.omega, p2.omega).reshape(self.pairs, 1)
 
-        # new data
         p1_logits, p2_logits = self.new_logits(p1, p2)
 
         p1_policy_flat, p2_policy_flat = self.get_expanded_policies(p1_logits, p2_logits)
@@ -41,11 +39,19 @@ class Solver:
                 index = i * p2.n + j
                 self.batched_payoffs[index, 0 : p1.actions[i], 0 : p2.actions[j]] = payoffs[i, j]
 
-        p1_rewards = np.matmul(self.batched_payoffs, p2_policy_flat)
-        p2_rewards = np.matmul(p1_policy_flat, self.batched_payoffs)
+        p1_returns = np.squeeze(np.matmul(self.batched_payoffs, p2_policy_flat), axis=-1)
+        p2_returns = -np.squeeze(np.swapaxes(np.matmul(p1_policy_flat, self.batched_payoffs), 1, 2), axis=-1)
+        assert p1_returns.shape == (self.pairs, p1.K)
+        assert p2_returns.shape == (self.pairs, p2.K)
 
-        assert p1_rewards.shape == (self.pairs, p1.K, 1)
-        assert p2_rewards.shape == (self.pairs, 1, p2.K)
+        rewards = np.matmul(p1_policy_flat, p1_returns[:, :, None]).squeeze(-1)
+        
+        p1_advantages = p1_returns - rewards
+        p2_advantages = p2_returns + rewards
+        assert p1_advantages.shape == (self.pairs, p1.K)
+        assert p2_advantages.shape == (self.pairs, p2.K)
+
+        pass
 
     def get_expanded_policies(self, p1_logits, p2_logits):
 
@@ -71,13 +77,18 @@ class Solver:
 
 if __name__ == "__main__":
     
-    p1 = Player([2, 1], [.5, .5])
-    p2 = Player([3, 3], [.9, .1])
+    p1 = Player([2], [1.0])
+    p2 = Player([2, 2], [0.5, 0.5])
 
     matrices = {}
+
+    # draw = np.array([[, 1], [1, 1]])
+    draw = np.zeros((2, 2))
+    win = np.array([[1, 1], [-1, -1]])
+
     for i in range(p1.n):
         for j in range(p2.n):
-            matrix = np.random.rand(p1.actions[i], p2.actions[j])
-            matrices[(i, j)] = matrix
+            matrices[(i, j)] = draw if j == 0 else win
+
 
     solver = Solver(p1, p2, matrices)
