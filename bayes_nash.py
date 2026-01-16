@@ -1,6 +1,34 @@
 import numpy as np
-
 from typing import Dict, List
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--main",
+    type=str,
+    required=True,
+    help="The function to run as main()",
+)
+parser.add_argument(
+    "--iterations",
+    type=int,
+    required=True,
+    help="Number of iterations to use when solving",
+)
+parser.add_argument(
+    "--lr",
+    type=float,
+    default=0.01,
+    help="Learning rate for NeuRD update.",
+)
+parser.add_argument(
+    "--games",
+    type=int,
+    default=1000,
+    help="Number of Bayesian games to try solving",
+)
+
+args = parser.parse_args()
 
 
 def softmax(x, axis=-1):
@@ -85,7 +113,7 @@ class Solver:
 
 def simple():
 
-    iterations = 10
+    iterations = args.iterations
 
     p1 = Player([2, 3], [0.5, 0.5])
     p2 = Player([2, 2], [0.5, 0.5])
@@ -105,32 +133,15 @@ def simple():
     matrices[(1, 1)] = win(3, 2)
 
     solver = Solver(p1, p2, matrices)
-    p1_logits, p2_logits = solver.go(iterations=iterations, lr=0.01)
+    p1_logits, p2_logits = solver.go(iterations=iterations, lr=args.lr)
     e = solver.expl(p1_logits, p2_logits)
     print(f"expl: {e}")
 
 
 def test():
     import random
-    import argparse
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--iterations",
-        type=int,
-        required=True,
-        help="Number of iterations to use when solving",
-    )
-    parser.add_argument(
-        "--tries",
-        type=int,
-        required=True,
-        help="Number of Bayesian games to try solving",
-    )
-
-    args = parser.parse_args()
-
-    tries = args.tries
+    games = args.games
     iterations = args.iterations
 
     n1 = random.randint(1, 5)
@@ -141,8 +152,9 @@ def test():
     o2 = [1.0 / n2 for _ in range(n2)]
 
     total_expl = 0
+    max_expl = 0
 
-    for _ in range(tries):
+    for _ in range(games):
         p1 = Player(k1, o1)
         p2 = Player(k2, o2)
 
@@ -152,13 +164,18 @@ def test():
                 matrices[(i, j)] = np.random.rand(k1[i], k2[j])
 
         solver = Solver(p1, p2, matrices)
-        p1_logits, p2_logits = solver.go(iterations=iterations, lr=0.01)
+        p1_logits, p2_logits = solver.go(iterations=iterations, lr=args.lr)
 
         e = solver.expl(p1_logits, p2_logits)
+        max_expl = max(e, max_expl)
         total_expl += e
 
-    print(f"Average exploitability: {total_expl / tries}")
+    print(f"Average exploitability: {total_expl / games}")
+    print(f"Max exploitability: {max_expl}")
 
 
 if __name__ == "__main__":
-    test()
+    if args.main == "simple":
+        simple()
+    elif args.main == "test":
+        test()
