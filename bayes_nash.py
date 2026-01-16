@@ -1,6 +1,7 @@
 import numpy as np
 from typing import Dict, List
 import argparse
+import random
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -19,6 +20,12 @@ parser.add_argument(
     "--lr",
     type=float,
     default=0.01,
+    help="Learning rate for NeuRD update.",
+)
+parser.add_argument(
+    "--lr-decay",
+    type=float,
+    default=1.0,
     help="Learning rate for NeuRD update.",
 )
 parser.add_argument(
@@ -41,9 +48,12 @@ def softmax(x, axis=-1):
 class Player:
 
     def __init__(self, actions, omega):
+        eps = 0.001
         assert len(actions) == len(omega), "Mismatched actions and omega lengths"
         assert all(k >= 1 for k in actions), "Some types have number of actions < 1"
-        assert sum(omega) == 1, "Omega pdf does not sum to 1"
+        assert (
+            abs(sum(omega) - 1) < eps
+        ), f"Omega pdf does not sum to [1 - eps, 1 + eps], eps = {eps}"
         self.n = len(actions)
         self.K = max(actions)
         self.actions = np.array(actions)
@@ -74,7 +84,7 @@ class Solver:
         self.p1 = p1
         self.p2 = p2
 
-    def go(self, iterations: int, lr: float, p: bool = False):
+    def go(self, iterations: int, lr: float, lr_decay: float, p: bool = False):
         p1_logits, p2_logits = self.p1.logits(), self.p2.logits()
 
         for _ in range(iterations):
@@ -94,8 +104,9 @@ class Solver:
             # assert p1_gradient.shape == (self.p1.n, self.p1.K)
             # assert p2_gradient.shape == (self.p2.n, self.p2.K)
 
-            p1_logits += p1_gradient
-            p2_logits += p2_gradient
+            p1_logits += lr * p1_gradient
+            p2_logits += lr * p2_gradient
+            lr *= lr_decay
 
         return p1_logits, p2_logits
 
@@ -109,6 +120,28 @@ class Solver:
         p1_best = np.max(p1_options, axis=1).sum()
         p2_best = np.max(p2_options, axis=1).sum()
         return p1_best + p2_best
+
+
+def generate_random_game_solver(seed, max_types=5, max_actions=4):
+    rng = random.Random(seed)
+    n1 = rng.randint(1, max_types)
+    n2 = rng.randint(1, max_types)
+    k1 = [rng.randint(1, max_actions) for _ in range(n1)]
+    k2 = [rng.randint(1, max_actions) for _ in range(n2)]
+    raw_o1 = [rng.random() for _ in range(n1)]
+    o1 = [x / sum(raw_o1) for x in raw_o1]
+    raw_o2 = [rng.random() for _ in range(n2)]
+    o2 = [x / sum(raw_o2) for x in raw_o2]
+
+    p1 = Player(k1, o1)
+    p2 = Player(k2, o2)
+    np_rng = np.random.default_rng(seed)
+    matrices = {}
+    for i in range(n1):
+        for j in range(n2):
+            matrices[(i, j)] = np_rng.random((k1[i], k2[j]))
+    solver = Solver(p1, p2, matrices)
+    return solver
 
 
 def simple():
@@ -133,46 +166,39 @@ def simple():
     matrices[(1, 1)] = win(3, 2)
 
     solver = Solver(p1, p2, matrices)
-    p1_logits, p2_logits = solver.go(iterations=iterations, lr=args.lr)
+    p1_logits, p2_logits = solver.go(
+        iterations=iterations, lr=args.lr, lr_decay=args.lr_decay
+    )
     e = solver.expl(p1_logits, p2_logits)
     print(f"expl: {e}")
 
 
 def test():
-    import random
 
     games = args.games
     iterations = args.iterations
 
-    n1 = random.randint(1, 5)
-    n2 = random.randint(1, 5)
-    k1 = [random.randint(1, 4) for _ in range(n1)]
-    k2 = [random.randint(1, 4) for _ in range(n2)]
-    o1 = [1.0 / n1 for _ in range(n1)]
-    o2 = [1.0 / n2 for _ in range(n2)]
-
     total_expl = 0
     max_expl = 0
+    max_expl_seed = None
 
     for _ in range(games):
-        p1 = Player(k1, o1)
-        p2 = Player(k2, o2)
-
-        matrices = {}
-        for i in range(n1):
-            for j in range(n2):
-                matrices[(i, j)] = np.random.rand(k1[i], k2[j])
-
-        solver = Solver(p1, p2, matrices)
-        p1_logits, p2_logits = solver.go(iterations=iterations, lr=args.lr)
-
+        seed = random.randint(0, 2**32 - 1)
+        solver = generate_random_game_solver(seed)
+        p1_logits, p2_logits = solver.go(
+            iterations=iterations, lr=args.lr, lr_decay=args.lr_decay
+        )
         e = solver.expl(p1_logits, p2_logits)
-        max_expl = max(e, max_expl)
+        if e > max_expl:
+            max_expl = e
+            max_expl_seed = seed
         total_expl += e
 
     print(f"Average exploitability: {total_expl / games}")
-    print(f"Max exploitability: {max_expl}")
+    print(f"Max exploitability: {max_expl} with seed {max_expl_seed}")
 
+
+HARD_SEEDS = [400845770, 2894948770, 2847287987, 826824531]
 
 if __name__ == "__main__":
     if args.main == "simple":
