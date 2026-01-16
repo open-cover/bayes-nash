@@ -3,6 +3,9 @@ from typing import Dict, List
 import argparse
 import random
 
+# 2 types, 4 actions
+HARD_SEEDS = [2600367002, 3961806577, 440091379, 378381923, 430445660]
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--main",
@@ -19,7 +22,7 @@ parser.add_argument(
 parser.add_argument(
     "--lr",
     type=float,
-    default=0.01,
+    default=1.0,
     help="Learning rate for NeuRD update.",
 )
 parser.add_argument(
@@ -34,7 +37,18 @@ parser.add_argument(
     default=1000,
     help="Number of Bayesian games to try solving",
 )
-
+parser.add_argument(
+    "--max-types",
+    type=int,
+    default=5,
+    help="",
+)
+parser.add_argument(
+    "--max-actions",
+    type=int,
+    default=5,
+    help="",
+)
 args = parser.parse_args()
 
 
@@ -87,9 +101,17 @@ class Solver:
     def go(self, iterations: int, lr: float, lr_decay: float, p: bool = False):
         p1_logits, p2_logits = self.p1.logits(), self.p2.logits()
 
+        p1_total_policies = np.zeros_like(p1_logits)
+        p2_total_policies = np.zeros_like(p2_logits)
+
+        p1_policies = None
+        p2_policies = None
+
         for _ in range(iterations):
             p1_policies = softmax(p1_logits)
             p2_policies = softmax(p2_logits)
+            p1_total_policies += p1_policies
+            p2_total_policies += p2_policies
             p1_returns = np.einsum("ijmn,jn->ijm", self.batched_payoffs, p2_policies)
             p2_returns = -np.einsum("im,ijmn->ijn", p1_policies, self.batched_payoffs)
 
@@ -108,11 +130,16 @@ class Solver:
             p2_logits += lr * p2_gradient
             lr *= lr_decay
 
-        return p1_logits, p2_logits
+        return (
+            p1_total_policies / iterations,
+            p2_total_policies / iterations,
+            p1_policies,
+            p2_policies,
+        )
 
-    def expl(self, p1_logits: np.array, p2_logits: np.array) -> float:
-        p1_policies = softmax(p1_logits)
-        p2_policies = softmax(p2_logits)
+    def expl(self, p1_policies: np.array, p2_policies: np.array) -> float:
+        # p1_policies = softmax(p1_logits)
+        # p2_policies = softmax(p2_logits)
         p1_returns = np.einsum("ijmn,jn->ijm", self.batched_payoffs, p2_policies)
         p2_returns = -np.einsum("im,ijmn->ijn", p1_policies, self.batched_payoffs)
         p1_options = np.sum(self.omega * p1_returns, axis=1)
@@ -128,10 +155,12 @@ def generate_random_game_solver(seed, max_types=5, max_actions=4):
     n2 = rng.randint(1, max_types)
     k1 = [rng.randint(1, max_actions) for _ in range(n1)]
     k2 = [rng.randint(1, max_actions) for _ in range(n2)]
-    raw_o1 = [rng.random() for _ in range(n1)]
-    o1 = [x / sum(raw_o1) for x in raw_o1]
-    raw_o2 = [rng.random() for _ in range(n2)]
-    o2 = [x / sum(raw_o2) for x in raw_o2]
+    # raw_o1 = [rng.random() for _ in range(n1)]
+    # o1 = [x / sum(raw_o1) for x in raw_o1]
+    # raw_o2 = [rng.random() for _ in range(n2)]
+    # o2 = [x / sum(raw_o2) for x in raw_o2]
+    o1 = [1.0 / n1 for _ in range(n1)]
+    o2 = [1.0 / n2 for _ in range(n2)]
 
     p1 = Player(k1, o1)
     p2 = Player(k2, o2)
@@ -166,39 +195,46 @@ def simple():
     matrices[(1, 1)] = win(3, 2)
 
     solver = Solver(p1, p2, matrices)
-    p1_logits, p2_logits = solver.go(
+    p1_average, p2_average, p1_last, p2_last = solver.go(
         iterations=iterations, lr=args.lr, lr_decay=args.lr_decay
     )
-    e = solver.expl(p1_logits, p2_logits)
+    e = solver.expl(p1_average, p2_average)
     print(f"expl: {e}")
 
 
 def test():
 
+    print(
+        "WARNING: program currently uses fixed seeds for --main=test. Head results carefully."
+    )
+
     games = args.games
     iterations = args.iterations
 
     total_expl = 0
+    total_expl_last = 0
     max_expl = 0
     max_expl_seed = None
 
-    for _ in range(games):
-        seed = random.randint(0, 2**32 - 1)
-        solver = generate_random_game_solver(seed)
-        p1_logits, p2_logits = solver.go(
+    # for _ in range(games):
+    for seed in HARD_SEEDS:
+        # seed = random.randint(0, 2**32 - 1)
+        solver = generate_random_game_solver(seed, args.max_types, args.max_actions)
+        p1_average, p2_average, p1_last, p2_last = solver.go(
             iterations=iterations, lr=args.lr, lr_decay=args.lr_decay
         )
-        e = solver.expl(p1_logits, p2_logits)
+        e = solver.expl(p1_average, p2_average)
+        e_last = solver.expl(p1_last, p2_last)
         if e > max_expl:
             max_expl = e
             max_expl_seed = seed
         total_expl += e
+        total_expl_last += e_last
 
     print(f"Average exploitability: {total_expl / games}")
     print(f"Max exploitability: {max_expl} with seed {max_expl_seed}")
+    print(f"Average exploitability (last): {total_expl_last / games}")
 
-
-HARD_SEEDS = [400845770, 2894948770, 2847287987, 826824531]
 
 if __name__ == "__main__":
     if args.main == "simple":
