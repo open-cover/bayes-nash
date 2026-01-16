@@ -3,9 +3,6 @@ from typing import Dict, List
 import argparse
 import random
 
-# 2 types, 4 actions
-HARD_SEEDS = [2600367002, 3961806577, 440091379, 378381923, 430445660]
-
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--main",
@@ -16,7 +13,11 @@ parser.add_argument(
 parser.add_argument(
     "--iterations",
     type=int,
-    required=True,
+    help="Number of iterations to use when solving",
+)
+parser.add_argument(
+    "--ucb-iterations",
+    type=int,
     help="Number of iterations to use when solving",
 )
 parser.add_argument(
@@ -34,7 +35,6 @@ parser.add_argument(
 parser.add_argument(
     "--games",
     type=int,
-    default=1000,
     help="Number of Bayesian games to try solving",
 )
 parser.add_argument(
@@ -51,19 +51,19 @@ parser.add_argument(
 parser.add_argument(
     "--max-types",
     type=int,
-    default=5,
+    default=1,
     help="",
 )
 parser.add_argument(
     "--min-actions",
     type=int,
-    default=1,
+    default=2,
     help="",
 )
 parser.add_argument(
     "--max-actions",
     type=int,
-    default=5,
+    default=2,
     help="",
 )
 
@@ -104,6 +104,51 @@ def softmax(x, axis=-1):
     return e / np.sum(e, axis=axis, keepdims=True)
 
 
+def p_norm(pdf, p):
+    powered = pdf**p
+    return powered / powered.sum(axis=1, keepdims=True)
+
+
+def do_ucb(matrix: np.ndarray, iter: int, c: float):
+    m, n = matrix.shape
+
+    p1_counts = np.zeros(m, dtype=int)
+    p1_rewards = np.zeros(m, dtype=float)
+    p2_counts = np.zeros(n, dtype=int)
+    p2_rewards = np.zeros(n, dtype=float)
+
+    for t in range(1, iter + 1):
+        p1_ucb = np.zeros(m)
+        for i in range(m):
+            if p1_counts[i] == 0:
+                p1_ucb[i] = np.inf
+            else:
+                p1_ucb[i] = p1_rewards[i] / p1_counts[i] + c * np.sqrt(
+                    np.log(t) / p1_counts[i]
+                )
+        p1_choice = np.argmax(p1_ucb)
+
+        p2_ucb = np.zeros(n)
+        for j in range(n):
+            if p2_counts[j] == 0:
+                p2_ucb[j] = np.inf
+            else:
+                p2_ucb[j] = p2_rewards[j] / p2_counts[j] + c * np.sqrt(
+                    np.log(t) / p2_counts[j]
+                )
+        p2_choice = np.argmax(p2_ucb)
+
+        reward = matrix[p1_choice, p2_choice]
+
+        p1_rewards[p1_choice] += reward
+        p1_counts[p1_choice] += 1
+
+        p2_rewards[p2_choice] += 1 - reward
+        p2_counts[p2_choice] += 1
+
+    return p1_counts / p1_counts.sum(), p2_counts / p2_counts.sum()
+
+
 class Player:
 
     def __init__(self, actions, omega):
@@ -128,20 +173,21 @@ class Player:
 class Solver:
 
     def __init__(self, p1: Player, p2: Player, payoffs: Dict[[int, int], np.array]):
+        self.p1 = p1
+        self.p2 = p2
+        self.payoffs = payoffs
+
         self.n1 = p1.n
         self.n2 = p2.n
-        self.pairs = p1.n * p2.n
+        self.K1 = p1.K
+        self.K2 = p2.K
         self.omega = np.outer(p1.omega, p2.omega)[..., None]
-        self.batched_payoffs = np.zeros((self.n1, self.n2, p1.K, p2.K))
-        for i in range(p1.n):
-            for j in range(p2.n):
+        self.batched_payoffs = np.zeros((self.n1, self.n2, self.K1, self.K2))
+        for i in range(self.n1):
+            for j in range(self.n2):
                 self.batched_payoffs[i, j, 0 : p1.actions[i], 0 : p2.actions[j]] = (
                     payoffs[i, j]
                 )
-
-        # TODO remove
-        self.p1 = p1
-        self.p2 = p2
 
     def go(self, iterations: int, lr: float, lr_decay: float, p: bool = False):
         p1_logits, p2_logits = self.p1.logits(), self.p2.logits()
@@ -158,13 +204,16 @@ class Solver:
             p1_total_policies += p1_policies
             p2_total_policies += p2_policies
             p1_returns = np.einsum("ijmn,jn->ijm", self.batched_payoffs, p2_policies)
-            p2_returns = -np.einsum("im,ijmn->ijn", p1_policies, self.batched_payoffs)
+            p2_returns = 1 - np.einsum(
+                "im,ijmn->ijn", p1_policies, self.batched_payoffs
+            )
 
             # payoff = np.einsum('ijn,jn->ij', p2_returns, p2_policies)[..., None] # mind the negative!
             p1_payoffs = np.einsum("im,ijm->ij", p1_policies, p1_returns)[..., None]
+            p2_payoffs = 1 - p1_payoffs
 
             p1_advantages = p1_returns - p1_payoffs
-            p2_advantages = p2_returns + p1_payoffs
+            p2_advantages = p2_returns - p2_payoffs
 
             p1_gradient = np.sum(p1_advantages * self.omega, axis=1)
             p2_gradient = np.sum(p2_advantages * self.omega, axis=0)
@@ -183,8 +232,6 @@ class Solver:
         )
 
     def expl(self, p1_policies: np.array, p2_policies: np.array) -> float:
-        # p1_policies = softmax(p1_logits)
-        # p2_policies = softmax(p2_logits)
         p1_returns = np.einsum("ijmn,jn->ijm", self.batched_payoffs, p2_policies)
         p2_returns = -np.einsum("im,ijmn->ijn", p1_policies, self.batched_payoffs)
         p1_options = np.sum(self.omega * p1_returns, axis=1)
@@ -192,6 +239,29 @@ class Solver:
         p1_best = np.max(p1_options, axis=1).sum()
         p2_best = np.max(p2_options, axis=1).sum()
         return p1_best + p2_best
+
+    def reward(self, p1_policies: np.array, p2_policies: np.array) -> float:
+        r = np.einsum("im,ijmn,jn->ij", p1_policies, self.batched_payoffs, p2_policies)[
+            ..., None
+        ]
+        # print(r.shape)
+        # print(self.omega.shape)
+        # return r
+        return (r * self.omega).sum()
+
+    def average_ucb_policies(self, iterations: int, c: float) -> [np.array, np.array]:
+
+        p1_out = np.zeros((self.n1, self.K1))
+        p2_out = np.zeros((self.n2, self.K2))
+
+        for i in range(self.n1):
+            for j in range(self.n2):
+                m = self.payoffs[(i, j)]
+                p1, p2 = do_ucb(m, iterations, c)
+                p1_out[i, : m.shape[0]] += self.p2.omega[j] * p1
+                p2_out[j, : m.shape[1]] += self.p1.omega[i] * p2
+
+        return p_norm(p1_out, 10.0), p_norm(p2_out, 10.0)
 
 
 def generate_random_game_solver(seed, args):
@@ -295,8 +365,35 @@ def test():
     print(f"Average exploitability (last): {total_expl_last / games}")
 
 
+def ucb():
+
+    for _ in range(args.games):
+
+        seed = random.randint(0, 2**32 - 1)
+        solver = generate_random_game_solver(seed, args)
+
+        p1_ucb, p2_ucb = solver.average_ucb_policies(args.ucb_iterations, 2.0)
+        p1_average, p2_average, p1_last, p2_last = solver.go(
+            iterations=args.iterations, lr=args.lr, lr_decay=args.lr_decay
+        )
+
+        r = solver.reward(p1_average, p2_average)
+        x = solver.reward(p1_ucb, p2_average)
+        y = solver.reward(p1_average, p2_ucb)
+
+        expl = solver.expl(p1_average, p2_average)
+        u = x - y
+
+        if expl < u:
+            print(f"Expl check failed for seed: {seed}")
+            print(f"UCB exploitation: {u}")
+            break
+
+
 if __name__ == "__main__":
     if args.main == "simple":
         simple()
     elif args.main == "test":
         test()
+    elif args.main == "ucb":
+        ucb()
