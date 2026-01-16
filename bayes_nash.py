@@ -38,9 +38,26 @@ parser.add_argument(
     help="Number of Bayesian games to try solving",
 )
 parser.add_argument(
+    "--uniform-types",
+    action="store_true",
+    help="",
+)
+parser.add_argument(
+    "--min-types",
+    type=int,
+    default=1,
+    help="",
+)
+parser.add_argument(
     "--max-types",
     type=int,
     default=5,
+    help="",
+)
+parser.add_argument(
+    "--min-actions",
+    type=int,
+    default=1,
     help="",
 )
 parser.add_argument(
@@ -49,6 +66,34 @@ parser.add_argument(
     default=5,
     help="",
 )
+
+
+def add_player_args(parser, prefix: str):
+    parser.add_argument(
+        prefix + "min-types",
+        type=int,
+        help="",
+    )
+    parser.add_argument(
+        prefix + "max-types",
+        type=int,
+        help="",
+    )
+    parser.add_argument(
+        prefix + "min-actions",
+        type=int,
+        help="",
+    )
+    parser.add_argument(
+        prefix + "max-actions",
+        type=int,
+        help="",
+    )
+
+
+add_player_args(parser, "--p1-")
+add_player_args(parser, "--p2-")
+
 args = parser.parse_args()
 
 
@@ -149,18 +194,38 @@ class Solver:
         return p1_best + p2_best
 
 
-def generate_random_game_solver(seed, max_types=5, max_actions=4):
+def generate_random_game_solver(seed, args):
     rng = random.Random(seed)
-    n1 = rng.randint(1, max_types)
-    n2 = rng.randint(1, max_types)
-    k1 = [rng.randint(1, max_actions) for _ in range(n1)]
-    k2 = [rng.randint(1, max_actions) for _ in range(n2)]
-    # raw_o1 = [rng.random() for _ in range(n1)]
-    # o1 = [x / sum(raw_o1) for x in raw_o1]
-    # raw_o2 = [rng.random() for _ in range(n2)]
-    # o2 = [x / sum(raw_o2) for x in raw_o2]
-    o1 = [1.0 / n1 for _ in range(n1)]
-    o2 = [1.0 / n2 for _ in range(n2)]
+    n1 = rng.randint(
+        args.p1_min_types or args.min_types, args.p1_max_types or args.max_types
+    )
+    n2 = rng.randint(
+        args.p2_min_types or args.min_types, args.p2_max_types or args.max_types
+    )
+    k1 = [
+        rng.randint(
+            args.p1_min_actions or args.min_actions,
+            args.p1_max_actions or args.max_actions,
+        )
+        for _ in range(n1)
+    ]
+    k2 = [
+        rng.randint(
+            args.p2_min_actions or args.min_actions,
+            args.p2_max_actions or args.max_actions,
+        )
+        for _ in range(n2)
+    ]
+    o1 = None
+    o2 = None
+    if args.uniform_types:
+        o1 = [1.0 / n1 for _ in range(n1)]
+        o2 = [1.0 / n2 for _ in range(n2)]
+    else:
+        raw_o1 = [rng.random() for _ in range(n1)]
+        o1 = [x / sum(raw_o1) for x in raw_o1]
+        raw_o2 = [rng.random() for _ in range(n2)]
+        o2 = [x / sum(raw_o2) for x in raw_o2]
 
     p1 = Player(k1, o1)
     p2 = Player(k2, o2)
@@ -169,8 +234,7 @@ def generate_random_game_solver(seed, max_types=5, max_actions=4):
     for i in range(n1):
         for j in range(n2):
             matrices[(i, j)] = np_rng.random((k1[i], k2[j]))
-    solver = Solver(p1, p2, matrices)
-    return solver
+    return Solver(p1, p2, matrices)
 
 
 def simple():
@@ -204,10 +268,6 @@ def simple():
 
 def test():
 
-    print(
-        "WARNING: program currently uses fixed seeds for --main=test. Head results carefully."
-    )
-
     games = args.games
     iterations = args.iterations
 
@@ -216,10 +276,9 @@ def test():
     max_expl = 0
     max_expl_seed = None
 
-    # for _ in range(games):
-    for seed in HARD_SEEDS:
-        # seed = random.randint(0, 2**32 - 1)
-        solver = generate_random_game_solver(seed, args.max_types, args.max_actions)
+    for _ in range(games):
+        seed = random.randint(0, 2**32 - 1)
+        solver = generate_random_game_solver(seed, args)
         p1_average, p2_average, p1_last, p2_last = solver.go(
             iterations=iterations, lr=args.lr, lr_decay=args.lr_decay
         )
