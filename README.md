@@ -4,16 +4,33 @@ This Python module defines Numpy and Torch methods for solving a Bayesian Nash e
 
 # Definitions
 
-A game involves two players. A player is a set of types $T$ and a set of actions labeled $\{1, ..., n_t\}$ for each $t \in T$ and a probability distribution function over the types $\Omega \in \Delta_T$.
+A player $i = 1, 2$ is 
 
-A policy for a player is a collection of type-specific strategies $\pi_t \in \Delta_{n_t}$ for $t \in T$.
+* a set of types $T_i$
 
-For each pair of types $s, t$ we have a zero-sum payoff matrix $M_{s, t} \in \mathbb{R}^{n_s \times n_t}$ of player 1's payoffs where player 1 is the row player.
-Then the payoff for policies $\pi_i \in \prod_{t \in T_i} \Delta_{n_t}$, $i = 1, 2$ is
-$\sum_{s \in T_1} \sum_{t \in T_2} \Omega_1(s) \Omega_2(t) P(M_{s,t}, \pi_1, \pi_2)$ for player 1 where $P$ is the usual row player payoff:
+* a set of actions labeled $\{1, ..., a_t\}$ for each $t \in T_i$
+
+* a probability distribution function over the types $\Omega \in \Delta_{T_i}$.
+
+For any type $t \in T_i$ a policy is a probability distribution function over the actions $\{1, ..., a_t \}$.
+
+A game is two players with a collection of matrices $M_{s, t} \in \mathbb{R}^{n_s \times n_t}$ for each pair of types $s \in T_1$, $t \in T_2$. These matrices define the player 1 rewards for a constant-sum normal form game where p1 plays the rows.
+
+A strategy for a player 
+
+$S_i \in \Pi_{t \in T_i} \Delta_{a_t}$
+
+is a collection of policies for each type $t \in T_i$.
+
+Then the payoff for strategies $\pi_i \in \prod_{t \in T_i} \Delta_{n_t}$, $i = 1, 2$ is given by
+
+$\sum_{s \in T_1} \sum_{t \in T_2} \Omega_1(s) \Omega_2(t) P(M_{s,t}, \pi_1, \pi_2)$ 
+
+for player 1 where $P$ is the usual row player payoff:
+
 $P(M, \pi_1, \pi_2) = \pi_1^T \times M \times \pi_2$.
 
-A Bayesian Nash equilibrium is then a pair of policies over the game where both players are indifferent to changing strategies. The exploitability of a pair of strategies is the sum of the maximal gain for both players if they could unilaterally change strategies. Therefore a strategy pair is Nash if the exploitability is zero.
+A Bayesian Nash equilibrium is then a pair of strategies where both players are indifferent to changing strategies. The exploitability of a pair of strategies is the sum of the maximal gain for both players if they could unilaterally change strategies. Therefore a strategy pair is Nash if the exploitability is zero.
 
 # Interface
 
