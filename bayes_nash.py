@@ -189,7 +189,7 @@ class Solver:
                     payoffs[i, j]
                 )
 
-    def go(self, iterations: int, lr: float, lr_decay: float, p: bool = False):
+    def run(self, iterations: int, lr: float, lr_decay: float, p: bool = False):
         p1_logits, p2_logits = self.p1.logits(), self.p2.logits()
 
         p1_total_policies = np.zeros_like(p1_logits)
@@ -204,22 +204,14 @@ class Solver:
             p1_total_policies += p1_policies
             p2_total_policies += p2_policies
             p1_returns = np.einsum("ijmn,jn->ijm", self.batched_payoffs, p2_policies)
-            p2_returns = 1 - np.einsum(
-                "im,ijmn->ijn", p1_policies, self.batched_payoffs
-            )
-
+            p2_returns = -np.einsum("im,ijmn->ijn", p1_policies, self.batched_payoffs)
             # payoff = np.einsum('ijn,jn->ij', p2_returns, p2_policies)[..., None] # mind the negative!
             p1_payoffs = np.einsum("im,ijm->ij", p1_policies, p1_returns)[..., None]
-            p2_payoffs = 1 - p1_payoffs
-
+            p2_payoffs = -p1_payoffs
             p1_advantages = p1_returns - p1_payoffs
             p2_advantages = p2_returns - p2_payoffs
-
             p1_gradient = np.sum(p1_advantages * self.omega, axis=1)
             p2_gradient = np.sum(p2_advantages * self.omega, axis=0)
-            # assert p1_gradient.shape == (self.p1.n, self.p1.K)
-            # assert p2_gradient.shape == (self.p2.n, self.p2.K)
-
             p1_logits += lr * p1_gradient
             p2_logits += lr * p2_gradient
             lr *= lr_decay
@@ -309,8 +301,6 @@ def generate_random_game_solver(seed, args):
 
 def simple():
 
-    iterations = args.iterations
-
     p1 = Player([2, 3], [0.5, 0.5])
     p2 = Player([2, 2], [0.5, 0.5])
 
@@ -329,16 +319,47 @@ def simple():
     matrices[(1, 1)] = win(3, 2)
 
     solver = Solver(p1, p2, matrices)
-    p1_average, p2_average, p1_last, p2_last = solver.go(
-        iterations=iterations, lr=args.lr, lr_decay=args.lr_decay
+    p1_average, p2_average, p1_last, p2_last = solver.run(
+        iterations=args.iterations, lr=args.lr, lr_decay=args.lr_decay
     )
     e = solver.expl(p1_average, p2_average)
+
+    print(f"Player 1 solution")
+    print(p1_average)
+    print(f"Player 2 solution")
+    print(p2_average)
+    print(f"expl: {e}")
+
+
+def one():
+    seed = random.randint(0, 2**32 - 1)
+    solver = generate_random_game_solver(seed, args)
+    p1_average, p2_average, p1_last, p2_last = solver.run(
+        iterations=args.iterations, lr=args.lr, lr_decay=args.lr_decay
+    )
+    e = solver.expl(p1_average, p2_average)
+    e_last = solver.expl(p1_last, p2_last)
+
+    for i in range(solver.p1.n):
+        for j in range(solver.p2.n):
+            print(f"({i}, {j}) p: {solver.omega[i, j, 0]}")
+            M = solver.payoffs[(i, j)]
+            print(M)
+
+    p1_average, p2_average, p1_last, p2_last = solver.run(
+        args.iterations, args.lr, args.lr_decay
+    )
+    e = solver.expl(p1_average, p2_average)
+
+    print(f"Player 1 solution")
+    print(p1_average)
+    print(f"Player 2 solution")
+    print(p2_average)
     print(f"expl: {e}")
 
 
 def test():
 
-    games = args.games
     iterations = args.iterations
 
     total_expl = 0
@@ -346,10 +367,10 @@ def test():
     max_expl = 0
     max_expl_seed = None
 
-    for _ in range(games):
+    for _ in range(args.games):
         seed = random.randint(0, 2**32 - 1)
         solver = generate_random_game_solver(seed, args)
-        p1_average, p2_average, p1_last, p2_last = solver.go(
+        p1_average, p2_average, p1_last, p2_last = solver.run(
             iterations=iterations, lr=args.lr, lr_decay=args.lr_decay
         )
         e = solver.expl(p1_average, p2_average)
@@ -360,14 +381,22 @@ def test():
         total_expl += e
         total_expl_last += e_last
 
-    print(f"Average exploitability: {total_expl / games}")
+    print(f"Average exploitability: {total_expl / args.games}")
     print(f"Max exploitability: {max_expl} with seed {max_expl_seed}")
-    print(f"Average exploitability (last): {total_expl_last / games}")
+    print(f"Average exploitability (last): {total_expl_last / args.games}")
 
 
 def ucb():
+    import matplotlib.pyplot as plt
 
     ucb_wins = 0
+    ucb_lower_expl = 0
+
+    total_expl = 0
+    total_ucb_expl = 0
+    expl_data = []
+    ucb_expl_data = []
+    vs_p2_average_diff = []
 
     for _ in range(args.games):
 
@@ -375,27 +404,83 @@ def ucb():
         solver = generate_random_game_solver(seed, args)
 
         p1_ucb, p2_ucb = solver.average_ucb_policies(args.ucb_iterations, 2.0)
-        p1_average, p2_average, p1_last, p2_last = solver.go(
+        p1_average, p2_average, p1_last, p2_last = solver.run(
             iterations=args.iterations, lr=args.lr, lr_decay=args.lr_decay
         )
 
         r = solver.reward(p1_average, p2_average)
         x = solver.reward(p1_ucb, p2_average)
         y = solver.reward(p1_average, p2_ucb)
+        a = solver.reward(p1_average, p2_average)
+        b = solver.reward(p1_average, p2_ucb)
 
-        if x > r:
-            print(f"UCB victory: {x} > {r} (difference = {x - r})")
-            ucb_wins += 1
+        vs_p2_average_diff.append(r - x)
 
         expl = solver.expl(p1_average, p2_average)
-        u = x - y
+        ucb_expl = solver.expl(p1_ucb, p2_ucb)
+        total_expl += expl
+        total_ucb_expl += ucb_expl
+        expl_data.append(expl)
+        ucb_expl_data.append(ucb_expl)
 
-        if expl < u:
+        if x > r:
+            ucb_wins += 1
+        if ucb_expl < expl:
+            ucb_lower_expl += 1
+
+        ucb_exploitation = x - y
+        if expl < ucb_exploitation:
             print(f"Expl check failed for seed: {seed}")
-            print(f"UCB exploitation: {u}")
-            # break
+            print(f"UCB exploitation: {ucb_exploitation}")
+            assert (
+                False
+            ), "The assert should only ever trip due to floating point errors"
 
     print(f"UCB win rate: {ucb_wins / args.games}")
+    print(f"UCB lower expl rate: {ucb_lower_expl / args.games}")
+    print(f"Average expl: {total_expl / args.games}")
+    print(f"Average UCB expl: {total_ucb_expl / args.games}")
+    print(f"Average diff: {sum(vs_p2_average_diff) / args.games}")
+
+    if True:
+        bin_width = 0.005
+        max_expl = max(max(expl_data), max(ucb_expl_data))
+        bins = np.arange(0.0, max_expl + bin_width, bin_width)
+
+        fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharey=True)
+
+        axes[0].hist(expl_data, bins=bins)
+        axes[0].set_title("expl")
+        axes[0].set_xlabel("expl")
+        axes[0].set_ylabel("frequency")
+
+        axes[1].hist(ucb_expl_data, bins=bins)
+        axes[1].set_title("ucb_expl")
+        axes[1].set_xlabel("expl")
+
+        plt.tight_layout()
+        plt.show()
+
+    if True:
+        bin_width = 0.005
+        min_diff = min(vs_p2_average_diff)
+        max_diff = max(vs_p2_average_diff)
+        bins = np.arange(min_diff, max_diff + bin_width, bin_width)
+
+        fig, axes = plt.subplots(1, 1, figsize=(10, 4), sharey=True)
+
+        axes.hist(vs_p2_average_diff, bins=bins)
+        axes.set_title("P1_Solved/P1_UCB vs P2_Solved differential")
+        axes.set_xlabel("Solved - UCB")
+        axes.set_ylabel("frequency")
+
+        # axes[1].hist(ucb_expl_data, bins=bins)
+        # axes[1].set_title("ucb_expl")
+        # axes[1].set_xlabel("expl")
+
+        plt.tight_layout()
+        plt.show()
+
 
 if __name__ == "__main__":
     if args.main == "simple":
@@ -404,3 +489,7 @@ if __name__ == "__main__":
         test()
     elif args.main == "ucb":
         ucb()
+    elif args.main == "one":
+        one()
+    else:
+        print("bad main arg")

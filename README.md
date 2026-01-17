@@ -17,12 +17,18 @@ A Bayesian Nash equilibrium is then a pair of policies over the game where both 
 
 # Interface
 
-A player is specified by a `List[int]` and `List[float]`, both the same length. The length is the number of types $T = \{0, ..., n - 1\}$. The values of the first list are the number of actions for that type and the second is $\Omega_i$ the pdf over those types.
+Player data is distinguished by the subscript $i = 1, 2$
 
-A game is then specified by two players and a list[matrix] of some 2D array of floats. The list has length $|T_1| \times |T_2|$ and is in row major order.
+A `Player` is specified by two lists with the same length, which corresponds to the number of "types" $T_i$ for that player.
+
+The first list `n : List[int]` the number of actions for that type
+
+The second list `o : List[float]` is the "priors" over those types, $\Omega_i$.
+
+A game is then specified by two players `p1 : Player`, `p2 :Player` completed by a `Dict[(int, int), np.array]` of matrix games. The keys are for thie dictionary are pairs indices of types for players 1 and 2, resp. The values are Numpy arrays with shape `(p1.n[i], p2.n[i])`.
 
 This data defines a `Solver` class which stores the data in padded tensors so that a single NeuRD update is simply batched matrix multiplication.
 
-This class has a method which takes a single `n : int`. It starts with a uniform strategy for both players and performs `n` iterations of the algorithm and returns the final and average strategies for both players. The pair of average strategies should be Nash.
+This class has a method which takes `n : int, lr : float, lr_decay : float`. It starts with a uniform strategy for both players and performs `n` iterations of the algorithm and returns the final and average strategies for both players. Each iterations the learning rate decay is applied `lr *= lr_decay`. The function returns the average strategyies for player 1 and 2, and also the latest iteration's strategies.
 
 It also has a method that takes a strategy (say the output of the previous method) and computes the exploitability.
