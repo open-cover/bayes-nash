@@ -367,6 +367,8 @@ def test():
 
 def ucb():
 
+    ucb_wins = 0
+
     for _ in range(args.games):
 
         seed = random.randint(0, 2**32 - 1)
@@ -381,14 +383,19 @@ def ucb():
         x = solver.reward(p1_ucb, p2_average)
         y = solver.reward(p1_average, p2_ucb)
 
+        if x > r:
+            print(f"UCB victory: {x} > {r} (difference = {x - r})")
+            ucb_wins += 1
+
         expl = solver.expl(p1_average, p2_average)
         u = x - y
 
         if expl < u:
             print(f"Expl check failed for seed: {seed}")
             print(f"UCB exploitation: {u}")
-            break
+            # break
 
+    print(f"UCB win rate: {ucb_wins / args.games}")
 
 if __name__ == "__main__":
     if args.main == "simple":
