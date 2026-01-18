@@ -1,6 +1,6 @@
 # About
 
-This Python module defines Numpy and Torch methods for solving a Bayesian Nash equilibrium using Neural Replicator Dynamics. Many iterations of the NeuRD update rule are applied to a uniform strategy to produce another strategy with low exploitability.
+This Python module defines vectorized Numpy methods for solving a Bayesian normal form game using Neural Replicator Dynamics. Many iterations of the NeuRD update rule are applied to a uniform strategy to produce another strategy with low exploitability.
 
 # Definitions
 
@@ -22,7 +22,7 @@ Then the *payoff* for a pair of strategies $S_i \in \prod_{t \in T_i} \Delta_{n_
 
 $\sum_{s \in T_1} \sum_{t \in T_2} \Omega_1(s) \Omega_2(t) U(M_{s,t}, \pi_1, \pi_2)$ 
 
-for player 1 where $P$ is the usual row player payoff for normal form games:
+for player 1 where $U$ is the usual row player payoff for normal form games:
 
 $U(M, \pi_1, \pi_2) = \pi_1^T \times M \times \pi_2$.
 

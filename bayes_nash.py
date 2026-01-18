@@ -11,6 +11,11 @@ parser.add_argument(
     help="The function to run as main()",
 )
 parser.add_argument(
+    "--seed",
+    type=int,
+    help="Initial seed",
+)
+parser.add_argument(
     "--iterations",
     type=int,
     help="Number of iterations to use when solving",
@@ -40,31 +45,31 @@ parser.add_argument(
 parser.add_argument(
     "--uniform-types",
     action="store_true",
-    help="",
+    help="Use uniform pdf over the both players types",
 )
 parser.add_argument(
     "--min-types",
     type=int,
     default=1,
-    help="",
+    help="Min types for both players",
 )
 parser.add_argument(
     "--max-types",
     type=int,
     default=1,
-    help="",
+    help="Max types for both players",
 )
 parser.add_argument(
     "--min-actions",
     type=int,
     default=2,
-    help="",
+    help="Min actions for both players",
 )
 parser.add_argument(
     "--max-actions",
     type=int,
     default=2,
-    help="",
+    help="Max actions for both players",
 )
 
 
@@ -332,7 +337,7 @@ def simple():
 
 
 def one():
-    seed = random.randint(0, 2**32 - 1)
+    seed = args.seed or random.randint(0, 2**32 - 1)
     solver = generate_random_game_solver(seed, args)
     p1_average, p2_average, p1_last, p2_last = solver.run(
         iterations=args.iterations, lr=args.lr, lr_decay=args.lr_decay
