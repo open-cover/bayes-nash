@@ -48,6 +48,11 @@ parser.add_argument(
     help="Use uniform pdf over the both players types",
 )
 parser.add_argument(
+    "--no-plots",
+    action="store_true",
+    help="Skip matplotlib data vis.",
+)
+parser.add_argument(
     "--min-types",
     type=int,
     default=1,
@@ -71,7 +76,6 @@ parser.add_argument(
     default=2,
     help="Max actions for both players",
 )
-
 
 def add_player_args(parser, prefix: str):
     parser.add_argument(
@@ -112,6 +116,12 @@ def softmax(x, axis=-1):
 def p_norm(pdf, p):
     powered = pdf**p
     return powered / powered.sum(axis=1, keepdims=True)
+
+
+def argmax(pdf):
+    out = (pdf == pdf.max(axis=1, keepdims=True)).astype(float)
+    # print(pdf.shape, out.shape)
+    return out
 
 
 def do_ucb(matrix: np.ndarray, iter: int, c: float):
@@ -258,7 +268,7 @@ class Solver:
                 p1_out[i, : m.shape[0]] += self.p2.omega[j] * p1
                 p2_out[j, : m.shape[1]] += self.p1.omega[i] * p2
 
-        return p_norm(p1_out, 10.0), p_norm(p2_out, 10.0)
+        return argmax(p1_out), argmax(p2_out)
 
 
 def generate_random_game_solver(seed, args):
@@ -392,7 +402,6 @@ def test():
 
 
 def ucb():
-    import matplotlib.pyplot as plt
 
     ucb_wins = 0
     ucb_lower_expl = 0
@@ -446,6 +455,11 @@ def ucb():
     print(f"Average expl: {total_expl / args.games}")
     print(f"Average UCB expl: {total_ucb_expl / args.games}")
     print(f"Average diff: {sum(vs_p2_average_diff) / args.games}")
+
+    if args.no_plots:
+        exit()
+
+    import matplotlib.pyplot as plt
 
     if True:
         bin_width = 0.005
